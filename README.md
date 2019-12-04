@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-2196F3.svg?style=for-the-badge)](https://opensource.org/licenses/Apache-2.0)
 [![language](https://img.shields.io/github/languages/top/smokelaboratory/easy-iap.svg?style=for-the-badge&colorB=f18e33)](https://kotlinlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg?style=for-the-badge)](https://www.android.com/)
-[![API](https://img.shields.io/badge/API-16%2B-F44336.svg?style=for-the-badge)](https://android-arsenal.com/api?level=21)
+[![API](https://img.shields.io/badge/API-21%2B-F44336.svg?style=for-the-badge)](https://android-arsenal.com/api?level=21)
 
 EasyIAP is an Android library to handle In-App purchases with minimal code.
 
@@ -57,12 +57,12 @@ Code of Conduct
 
 You are most welcome to contribute to this project!
 
-Please have a look at [Contributing Guidelines](https://github.com/smokelaboratory/easy-iap/blob/master/CONTRIBUTING.md), before contributing and proposing a change.
+Please have a look at [Contributing Guidelines](https://github.com/smokelaboratory/easy-iap/blob/master/CONTRIBUTING.md) before contributing and proposing a change.
 
 # License
 
 ```
-   Copyright © 2019 Smokelaboratory
+   Copyright © 2019 smokelaboratory
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
