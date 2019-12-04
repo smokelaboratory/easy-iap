@@ -12,7 +12,7 @@ EasyIAP is an Android library to handle In-App purchases with minimal code.
 
 ## Features
 
-* Completely written in Kotlin
+* Written in Kotlin
 * No boilerplate code
 * Easy initialisation
 * Supports InApp & Subscription products
