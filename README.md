@@ -35,7 +35,7 @@ allprojects {
 
 ```
 dependencies {
-    implementation 'com.github.smokelaboratory:easy-iap:0.1.0'
+    implementation 'com.github.smokelaboratory:easy-iap:1.0.0'
 }
 ```
 
