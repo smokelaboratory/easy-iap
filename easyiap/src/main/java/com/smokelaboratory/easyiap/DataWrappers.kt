@@ -1,5 +1,7 @@
 package com.smokelaboratory.easyiap
 
+import com.android.billingclient.api.AccountIdentifiers
+import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.SkuDetails
 
@@ -23,10 +25,12 @@ class DataWrappers {
         val priceCurrencyCode: String,
         val subscriptionPeriod: String,
         val title: String,
-        val type: String
+        val type: String,
+        var isConsumable: Boolean = false
     )
 
     data class PurchaseInfo(
+        val skuInfo: SkuInfo,
         val purchaseState: Int,
         val developerPayload: String?,
         val isAcknowledged: Boolean,
@@ -37,6 +41,12 @@ class DataWrappers {
         val purchaseTime: Long,
         val purchaseToken: String,
         val signature: String,
-        val sku: String
+        val sku: String,
+        val accountIdentifiers: AccountIdentifiers?
+    )
+
+    data class BillingResponse(
+        val message: String,
+        val responseCode: Int = 0
     )
 }

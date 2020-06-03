@@ -36,34 +36,46 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
             .connect()
 
         easyIapConnector.setOnInAppEventsListener(object : InAppEventsListener {
-            override fun onSkuDetailsRetrieved(skuType: String, skuDetailsList: List<DataWrappers.SkuInfo>) {
-                Log.d(tag, "Retrieved SKU details list : $skuDetailsList")
+
+            override fun onSubscriptionsFetched(skuDetailsList: List<DataWrappers.SkuInfo>) {
                 fetchedSkuDetailsList.addAll(skuDetailsList)
+                Log.d(tag, "Retrieved SKU details list : $skuDetailsList")
             }
 
-            override fun onConsumablePurchaseRetrieved(consumableProduct: DataWrappers.PurchaseInfo) {
-                Log.d(tag, "Retrieved consumable product : $consumableProduct")
+            override fun onInAppProductsFetched(skuDetailsList: List<DataWrappers.SkuInfo>) {
+                fetchedSkuDetailsList.addAll(skuDetailsList)
+                Log.d(tag, "Retrieved SKU details list : $skuDetailsList")
             }
 
-            override fun onNonConsumablePurchaseRetrieved(nonConsumableProduct: DataWrappers.PurchaseInfo) {
-                Log.d(tag, "Retrieved non consumable product : $nonConsumableProduct")
+            override fun onPurchaseAcknowledged(purchase: DataWrappers.PurchaseInfo) {
+                Log.d(tag, "onPurchaseAcknowledged")
             }
 
-            override fun onError(inAppConnector: EasyIapConnector, message: String) {
-                Log.e(tag, message)
+            override fun onProductsPurchased(purchases: List<DataWrappers.PurchaseInfo>) {
+                Log.d(tag, "Purchase : $purchases")
+            }
+
+            override fun onError(
+                inAppConnector: EasyIapConnector,
+                result: DataWrappers.BillingResponse?
+            ) {
+                Log.d(tag, "Error : ${result?.message}")
             }
         })
     }
 
     private fun listeners() {
         bt_purchase_cons.setOnClickListener {
-            easyIapConnector.makePurchase(fetchedSkuDetailsList.find { it.sku == "gas" }!!)
+            if (fetchedSkuDetailsList.find { it.sku == "gas" } != null)
+                easyIapConnector.makePurchase("gas")
         }
         bt_purchase_subs.setOnClickListener {
-            easyIapConnector.makePurchase(fetchedSkuDetailsList.find { it.sku == "gold_monthly" }!!)
+            if (fetchedSkuDetailsList.find { it.sku == "gold_monthly" } != null)
+                easyIapConnector.makePurchase("gold_monthly")
         }
         bt_purchase_iap.setOnClickListener {
-            easyIapConnector.makePurchase(fetchedSkuDetailsList.find { it.sku == "premium_car" }!!)
+            if (fetchedSkuDetailsList.find { it.sku == "premium_car" } != null)
+                easyIapConnector.makePurchase("premium_car")
         }
     }
 }
