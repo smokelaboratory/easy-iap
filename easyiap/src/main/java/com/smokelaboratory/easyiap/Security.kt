@@ -7,6 +7,7 @@ import java.security.spec.InvalidKeySpecException
 import java.security.spec.X509EncodedKeySpec
 
 /**
+ * ---NOTE : Verification should be done at server side for more safety---
  * Used to perform purchase signature verification process using RSA.
  * This is done to ensure more security.
  */

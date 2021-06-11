@@ -1,358 +1,245 @@
 package com.smokelaboratory.easyiap
 
 import android.content.Context
-import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import com.android.billingclient.api.*
-import com.android.billingclient.api.BillingClient.BillingResponseCode.*
-import com.android.billingclient.api.BillingClient.FeatureType.SUBSCRIPTIONS
+import com.android.billingclient.api.BillingClient.BillingResponseCode.OK
 import com.android.billingclient.api.BillingClient.SkuType.INAPP
 import com.android.billingclient.api.BillingClient.SkuType.SUBS
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
-/**
- * Wrapper class for Google In-App purchases.
- * Handles vital processes while dealing with IAP.
- * Works around a listener [InAppEventsListener] for delivering events back to the caller.
- */
-class EasyIapConnector(
-    private val activity: AppCompatActivity,
-    private val base64Key: String
-) {
-    private var shouldAutoAcknowledge: Boolean = false
-    private var fetchedSkuDetailsList = mutableListOf<SkuDetails>()
-    private val tag = "InAppLog"
-    private var inAppEventsListener: InAppEventsListener? = null
+class EasyIapConnector(context: Context) {
 
-    private var inAppIds: List<String>? = null
-    private var subIds: List<String>? = null
-    private var consumableIds: List<String> = listOf()
+    private var isIapConnected: Boolean = false
+    private val easyIapErrorCode = 23
+    private var base64Key: String? = null
+    private val iapConnectionMutex = Mutex()
 
-    private lateinit var iapClient: BillingClient
+    private var subscriptionSkuList = listOf<String>()
+    private var consumableSkuList = listOf<String>()
 
-    init {
-        init(activity)
-    }
+    private val iapPurchaseResultFlow =
+        MutableSharedFlow<Pair<BillingResult, Purchase>>(extraBufferCapacity = 1)
+    private val iapErrorFlow = MutableSharedFlow<BillingResult>(extraBufferCapacity = 1)
 
-    /**
-     * To set INAPP product IDs.
-     */
-    fun setInAppProductIds(inAppIds: List<String>): EasyIapConnector {
-        this.inAppIds = inAppIds
+    private val billingClient: BillingClient = BillingClient.newBuilder(context)
+        .setListener { billingResult, purchases ->
+            when (billingResult.responseCode) {
+                OK ->
+                    if (!purchases.isNullOrEmpty())
+                        CoroutineScope(Dispatchers.IO).launch {
+                            purchases.forEach {
+                                //todo : check isAcknowledged for consumables
+                                if (it.purchaseState == Purchase.PurchaseState.PURCHASED && !it.isAcknowledged)
+                                    acknowledgePurchase(
+                                        it, when {
+                                            subscriptionSkuList.contains(it.skus.firstOrNull()) -> SUBS
+                                            consumableSkuList.contains(it.skus.firstOrNull()) -> INAPP
+                                            else -> ""
+                                        }
+                                    )
+                            }
+                        }
+                else -> iapErrorFlow.tryEmit(billingResult)
+            }
+        }
+        .enablePendingPurchases()
+        .build()
+
+    //region setup
+
+    fun connect(): EasyIapConnector {
+        CoroutineScope(Dispatchers.IO).launch {
+            connectIap()
+        }
         return this
     }
 
-    /**
-     * To set consumable product IDs.
-     * Rest of the IDs will be considered non-consumable.
-     */
-    fun setConsumableProductIds(consumableIds: List<String>): EasyIapConnector {
-        this.consumableIds = consumableIds
+    fun setEncodedBase64Key(base64Key: String): EasyIapConnector {
+        this.base64Key = base64Key
         return this
     }
 
-    /**
-     * EasyIap will auto acknowledge the purchase
-     */
-    fun autoAcknowledge() {
-        shouldAutoAcknowledge = true
+    fun getIapListener(iapListener: (iapErrorFlow: MutableSharedFlow<BillingResult>, iapPurchaseResultFlow: MutableSharedFlow<Pair<BillingResult, Purchase>>) -> Unit) {
+        iapListener.invoke(iapErrorFlow, iapPurchaseResultFlow)
     }
 
-    /**
-     * To set SUBS product IDs.
-     */
-    fun setSubscriptionIds(subIds: List<String>): EasyIapConnector {
-        this.subIds = subIds
+    fun enableAutoAcknowledge(
+        subscriptionSkuList: List<String>? = null,
+        consumableSkuList: List<String>? = null
+    ): EasyIapConnector {
+        subscriptionSkuList?.let {
+            this.subscriptionSkuList = it
+        }
+        consumableSkuList?.let {
+            this.consumableSkuList = it
+        }
+
         return this
     }
 
+    //endregion
+
+    //region connection
+
+    private suspend fun connectIap() {
+        iapConnectionMutex.withLock {
+            if (!isIapConnected)
+                suspendCoroutine<Unit> {
+                    billingClient.startConnection(object : BillingClientStateListener {
+                        override fun onBillingSetupFinished(billingResult: BillingResult) {
+                            when (billingResult.responseCode) {
+                                OK -> isIapConnected = true
+                                else -> iapErrorFlow.tryEmit(billingResult)
+                            }
+                            it.resume(Unit)
+                        }
+
+                        override fun onBillingServiceDisconnected() {
+                            iapErrorFlow.tryEmit(
+                                prepareBillingResponse(
+                                    easyIapErrorCode,
+                                    "IAP disconnected"
+                                )
+                            )
+
+                            isIapConnected = false
+                            it.resume(Unit)
+                        }
+                    })
+                }
+        }
+    }
+
+    fun disconnectIap() {
+        billingClient.endConnection()
+        isIapConnected = false
+    }
+
+    private suspend fun checkIAPConnection() {
+        if (!isIapConnected)
+            connectIap()
+    }
+
+    //endregion
+
+    //region fetch products
+
+    suspend fun getInAppProducts(skuList: List<String>): List<SkuDetails> =
+        getProducts(INAPP, skuList)
+
+    suspend fun getSubscriptionProducts(skuList: List<String>): List<SkuDetails> =
+        getProducts(SUBS, skuList)
+
+    private suspend fun getProducts(productType: String, skuList: List<String>): List<SkuDetails> {
+        checkIAPConnection()
+
+        if (isIapConnected) {
+            val result = billingClient.querySkuDetails(
+                SkuDetailsParams.newBuilder().setSkusList(skuList).setType(productType)
+                    .build()
+            )
+
+            when (result.billingResult.responseCode) {
+                OK -> return result.skuDetailsList.orEmpty()
+                else ->
+                    iapErrorFlow.tryEmit(result.billingResult)
+            }
+        }
+
+        return listOf()
+    }
+
     /**
-     * Called to purchase an item.
-     * Its result is received in [PurchasesUpdatedListener] which further is handled
-     * by [handleConsumableProducts] / [handleNonConsumableProducts].
+     * returns active subscription & one-time purchases
      */
-    fun makePurchase(sku: String) {
-        if (fetchedSkuDetailsList.isEmpty())
-            inAppEventsListener?.onError(this, DataWrappers.BillingResponse("Products not fetched"))
-        else
-            iapClient.launchBillingFlow(
-                activity,
-                BillingFlowParams.newBuilder().setSkuDetails(fetchedSkuDetailsList.find { it.sku == sku }!!).build()
+    suspend fun getPurchaseHistory(skuType: String) =
+        suspendCoroutine<List<Purchase>> {
+            billingClient.queryPurchasesAsync(
+                skuType
+            ) { billingResult, products ->
+                if (billingResult.responseCode != OK)
+                    iapErrorFlow.tryEmit(billingResult)
+                it.resume(products)
+            }
+        }
+
+    //endregion
+
+    //region purchase product
+
+    suspend fun purchaseProduct(activity: AppCompatActivity, skuDetails: SkuDetails) {
+        connectIap()
+
+        if (isIapConnected) {
+            val resultCode = billingClient.launchBillingFlow(
+                activity, BillingFlowParams.newBuilder()
+                    .setSkuDetails(skuDetails)
+                    .build()
+            ).responseCode
+
+            if (resultCode != OK)
+                iapErrorFlow.tryEmit(
+                    prepareBillingResponse(
+                        easyIapErrorCode,
+                        "Cannot launch billing flow"
+                    )
+                )
+        }
+    }
+
+    /**
+     * acknowledge a purchase to give entitlement to user
+     */
+    suspend fun acknowledgePurchase(purchase: Purchase, skuType: String) {
+        if (isPurchaseSignatureValid(purchase)) {
+            connectIap()
+
+            if (isIapConnected) {
+                val acknowledgementResult = when (skuType) {
+                    INAPP -> billingClient.consumePurchase(
+                        ConsumeParams.newBuilder()
+                            .setPurchaseToken(purchase.purchaseToken)
+                            .build()
+                    ).billingResult
+                    SUBS -> billingClient.acknowledgePurchase(
+                        AcknowledgePurchaseParams.newBuilder()
+                            .setPurchaseToken(purchase.purchaseToken)
+                            .build()
+                    )
+                    else -> prepareBillingResponse(OK, "Invalid SKU for acknowledgement")
+                }
+
+                iapPurchaseResultFlow.emit(Pair(acknowledgementResult, purchase))
+            }
+        } else
+            iapErrorFlow.emit(
+                prepareBillingResponse(
+                    easyIapErrorCode,
+                    "Purchase cannot be verified"
+                )
             )
     }
 
-    /**
-     * To attach an event listener to establish a bridge with the caller.
-     */
-    fun setOnInAppEventsListener(inAppEventsListener: InAppEventsListener) {
-        this.inAppEventsListener = inAppEventsListener
-    }
-
-    /**
-     * To initialise EasyIapConnector.
-     */
-    private fun init(context: Context) {
-        iapClient = BillingClient.newBuilder(context)
-            .enablePendingPurchases()
-            .setListener { billingResult, purchases ->
-                /**
-                 * Only recent purchases are received here
-                 */
-
-                when (billingResult.responseCode) {
-                    OK -> purchases?.let { processPurchases(purchases) }
-                    ITEM_ALREADY_OWNED -> inAppEventsListener?.onError(
-                        this,
-                        billingResult.run {
-                            DataWrappers.BillingResponse(
-                                debugMessage,
-                                responseCode
-                            )
-                        }
-                    )
-                    SERVICE_DISCONNECTED -> connect()
-                    else -> Log.i(tag, "Purchase update : ${billingResult.debugMessage}")
-                }
-            }.build()
-    }
-
-    /**
-     * Connects billing client with Play console to start working with IAP.
-     */
-    fun connect(): EasyIapConnector {
-        Log.d(tag, "Billing service : Connecting...")
-        if (!iapClient.isReady) {
-            iapClient.startConnection(object : BillingClientStateListener {
-                override fun onBillingServiceDisconnected() {
-                    inAppEventsListener?.onError(
-                        this@EasyIapConnector,
-                        DataWrappers.BillingResponse("Billing service : Disconnected")
-                    )
-                }
-
-                override fun onBillingSetupFinished(billingResult: BillingResult?) {
-                    when (billingResult?.responseCode) {
-                        OK -> {
-                            Log.d(tag, "Billing service : Connected")
-                            inAppIds?.let {
-                                querySku(INAPP, it)
-                            }
-                            subIds?.let {
-                                querySku(SUBS, it)
-                            }
-                        }
-                        BILLING_UNAVAILABLE -> Log.d(tag, "Billing service : Unavailable")
-                        else -> Log.d(tag, "Billing service : Setup error")
-                    }
-                }
-            })
-        }
-        return this
-    }
-
-    /**
-     * Fires a query in Play console to get [SkuDetails] for provided type and IDs.
-     */
-    private fun querySku(skuType: String, ids: List<String>) {
-        iapClient.querySkuDetailsAsync(
-            SkuDetailsParams.newBuilder()
-                .setSkusList(ids).setType(skuType).build()
-        ) { billingResult, skuDetailsList ->
-            when (billingResult.responseCode) {
-                OK -> {
-                    if (skuDetailsList.isEmpty()) {
-                        Log.d(tag, "Query SKU : Data not found (List empty)")
-                        inAppEventsListener?.onError(
-                            this,
-                            billingResult.run {
-                                DataWrappers.BillingResponse(
-                                    debugMessage,
-                                    responseCode
-                                )
-                            })
-                    } else {
-                        Log.d(tag, "Query SKU : Data found")
-
-                        fetchedSkuDetailsList.addAll(skuDetailsList)
-
-                        val fetchedSkuInfo = skuDetailsList.map {
-                            getSkuInfo(it)
-                        }
-
-                        if (skuType == SUBS)
-                            inAppEventsListener?.onSubscriptionsFetched(fetchedSkuInfo)
-                        else
-                            inAppEventsListener?.onInAppProductsFetched(fetchedSkuInfo.map {
-                                it.isConsumable = consumableIds.contains(it.sku)
-                                it
-                            })
-                    }
-                }
-                else -> {
-                    Log.d(tag, "Query SKU : Failed")
-                    inAppEventsListener?.onError(
-                        this,
-                        billingResult.run {
-                            DataWrappers.BillingResponse(
-                                debugMessage,
-                                responseCode
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    private fun getSkuInfo(skuDetails: SkuDetails): DataWrappers.SkuInfo {
-        return DataWrappers.SkuInfo(
-            skuDetails.sku,
-            skuDetails.description,
-            skuDetails.freeTrialPeriod,
-            skuDetails.iconUrl,
-            skuDetails.introductoryPrice,
-            skuDetails.introductoryPriceAmountMicros,
-            skuDetails.introductoryPriceCycles,
-            skuDetails.introductoryPricePeriod,
-            skuDetails.isRewarded,
-            skuDetails.originalJson,
-            skuDetails.originalPrice,
-            skuDetails.originalPriceAmountMicros,
-            skuDetails.price,
-            skuDetails.priceAmountMicros,
-            skuDetails.priceCurrencyCode,
-            skuDetails.subscriptionPeriod,
-            skuDetails.title,
-            skuDetails.type
-        )
-    }
-
-    /**
-     * Returns all the **non-consumable** purchases of the user.
-     */
-    fun getAllPurchases() {
-        val allPurchases = mutableListOf<Purchase>()
-        allPurchases.addAll(iapClient.queryPurchases(INAPP).purchasesList)
-        if (isSubSupportedOnDevice())
-            allPurchases.addAll(iapClient.queryPurchases(SUBS).purchasesList)
-        processPurchases(allPurchases)
-    }
-
-    /**
-     * Checks purchase signature for more security.
-     */
-    private fun processPurchases(allPurchases: List<Purchase>) {
-        if (allPurchases.isNotEmpty()) {
-            val validPurchases = allPurchases.filter {
-                isPurchaseSignatureValid(it)
-            }.map { purchase ->
-                DataWrappers.PurchaseInfo(
-                    getSkuInfo(fetchedSkuDetailsList.find { it.sku == purchase.sku }!!),
-                    purchase.purchaseState,
-                    purchase.developerPayload,
-                    purchase.isAcknowledged,
-                    purchase.isAutoRenewing,
-                    purchase.orderId,
-                    purchase.originalJson,
-                    purchase.packageName,
-                    purchase.purchaseTime,
-                    purchase.purchaseToken,
-                    purchase.signature,
-                    purchase.sku,
-                    purchase.accountIdentifiers
-                )
-            }
-
-            inAppEventsListener?.onProductsPurchased(validPurchases)
-
-            if (shouldAutoAcknowledge)
-                validPurchases.forEach {
-                    acknowledgePurchase(it)
-                }
-        }
-    }
-
-    /**
-     * Purchase of non-consumable products must be acknowledged to Play console.
-     * This will avoid refunding for these products to users by Google.
-     *
-     * Consumable products might be brought/consumed by users multiple times (for eg. diamonds, coins).
-     * Hence, it is necessary to notify Play console about such products.
-     */
-    fun acknowledgePurchase(purchase: DataWrappers.PurchaseInfo) {
-        purchase.run {
-            if (consumableIds.contains(sku))
-                iapClient.consumeAsync(
-                    ConsumeParams.newBuilder()
-                        .setPurchaseToken(purchaseToken).build()
-                ) { billingResult, purchaseToken ->
-                    when (billingResult.responseCode) {
-                        OK -> inAppEventsListener?.onPurchaseAcknowledged(this)
-                        else -> {
-                            Log.d(
-                                tag,
-                                "Handling consumables : Error -> ${billingResult.debugMessage}"
-                            )
-                            inAppEventsListener?.onError(
-                                this@EasyIapConnector,
-                                billingResult.run {
-                                    DataWrappers.BillingResponse(
-                                        debugMessage,
-                                        responseCode
-                                    )
-                                }
-                            )
-                        }
-                    }
-                } else
-                iapClient.acknowledgePurchase(
-                    AcknowledgePurchaseParams.newBuilder().setPurchaseToken(
-                        purchaseToken
-                    ).build()
-                ) { billingResult ->
-                    when (billingResult.responseCode) {
-                        OK -> inAppEventsListener?.onPurchaseAcknowledged(this)
-                        else -> {
-                            Log.d(
-                                tag,
-                                "Handling non consumables : Error -> ${billingResult.debugMessage}"
-                            )
-                            inAppEventsListener?.onError(
-                                this@EasyIapConnector,
-                                billingResult.run {
-                                    DataWrappers.BillingResponse(
-                                        debugMessage,
-                                        responseCode
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-        }
-    }
-
-    /**
-     * Before using subscriptions, device-support must be checked.
-     */
-    private fun isSubSupportedOnDevice(): Boolean {
-        var isSupported = false
-        when (iapClient.isFeatureSupported(SUBSCRIPTIONS).responseCode) {
-            OK -> {
-                isSupported = true
-                Log.d(tag, "Subs support check : Success")
-            }
-            SERVICE_DISCONNECTED -> connect()
-            else -> Log.d(tag, "Subs support check : Error")
-        }
-        return isSupported
-    }
-
-    /**
-     * Checks purchase signature validity
-     */
     private fun isPurchaseSignatureValid(purchase: Purchase): Boolean {
-        return Security.verifyPurchase(
-            base64Key, purchase.originalJson, purchase.signature
-        )
+        base64Key?.let {
+            return Security.verifyPurchase(
+                it, purchase.originalJson, purchase.signature
+            )
+        }
+        return true
     }
+
+    //endregion
+
+    private fun prepareBillingResponse(responseCode: Int, message: String) =
+        BillingResult.newBuilder()
+            .setDebugMessage(message).setResponseCode(responseCode).build()
 }

@@ -1,17 +1,20 @@
 package com.smokelaboratory.easyiapexample
 
-import androidx.appcompat.app.AppCompatActivity
+import android.icu.text.DateTimePatternGenerator.PatternInfo.OK
 import android.os.Bundle
 import android.util.Log
-import com.smokelaboratory.easyiap.DataWrappers
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.android.billingclient.api.SkuDetails
 import com.smokelaboratory.easyiap.EasyIapConnector
-import com.smokelaboratory.easyiap.InAppEventsListener
 import kotlinx.android.synthetic.main.activity_main.*
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity(R.layout.activity_main) {
 
     private val tag: String = "EasyIAP"
-    private var fetchedSkuDetailsList = mutableListOf<DataWrappers.SkuInfo>()
+    private var fetchedSkuDetailsList = mutableListOf<SkuDetails>()
     private lateinit var easyIapConnector: EasyIapConnector
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,60 +25,75 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
     }
 
     private fun connectEasyIap() {
-        easyIapConnector = EasyIapConnector(
-            this, "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArEaiCq7os9cmF" +
-                    "+i564+pIOiSOVZa/LRzu0K79Dg6wKWjnJ1PkHAa4ZOJ81KrxyFk3q3UiJ3lNsTCdW216+KKdKp+YCOFLs" +
-                    "sN+4FKjFBqY9lJbm6uuxZ9cPugMOTVFrVlmreYyhIY4jysfo4+LeyEmB7D20X7M+7diCRBEIsOY9lA2ne" +
-                    "OtD6j0BR4rhLGR3xjN0LGrhCCdbw42+eIkc/awbY7FypLMJjbAmEnNBe1tlOxxX6ZgspwAlY8XjnX832l" +
-                    "xxHdnuJKSPGtYCQLSt/LYc/go90/kc/U+oPtQy/KgCiQEcKeIL1a6AB294JDogkHuqRIeXIu1n4sAfzG" +
-                    "cshrJQIDAQAB"
-        )
-            .setInAppProductIds(listOf("gas", "premium_car"))
-            .setSubscriptionIds(listOf("gold_monthly", "gold_yearly"))
-            .setConsumableProductIds(listOf("gas"))
-            .connect()
+        easyIapConnector = EasyIapConnector(this).enableAutoAcknowledge(
+            consumableSkuList = listOf("gas"),
+            subscriptionSkuList = listOf("infinite_gas_yearly", "infinite_gas_yearly")
+        ).connect()
 
-        easyIapConnector.setOnInAppEventsListener(object : InAppEventsListener {
-
-            override fun onSubscriptionsFetched(skuDetailsList: List<DataWrappers.SkuInfo>) {
-                fetchedSkuDetailsList.addAll(skuDetailsList)
-                Log.d(tag, "Retrieved SKU details list : $skuDetailsList")
+        easyIapConnector.getIapListener { iapErrorFlow, iapPurchaseResultFlow ->
+            lifecycleScope.launch {
+                iapErrorFlow.collect {
+                    Log.d(tag, "Error => ${it.responseCode} : ${it.debugMessage}")
+                }
             }
 
-            override fun onInAppProductsFetched(skuDetailsList: List<DataWrappers.SkuInfo>) {
-                fetchedSkuDetailsList.addAll(skuDetailsList)
-                Log.d(tag, "Retrieved SKU details list : $skuDetailsList")
+            lifecycleScope.launch {
+                iapPurchaseResultFlow.collect {
+                    if (it.first.responseCode == OK)
+                        Log.d(tag, "Purchase => ${it.second}")
+                    else
+                        Log.d(
+                            tag,
+                            "Acknowledgement error => ${it.first.responseCode} : ${it.first.debugMessage}"
+                        )
+                }
             }
+        }
 
-            override fun onPurchaseAcknowledged(purchase: DataWrappers.PurchaseInfo) {
-                Log.d(tag, "onPurchaseAcknowledged")
-            }
+        lifecycleScope.launch {
+            fetchedSkuDetailsList.addAll(
+                easyIapConnector.getInAppProducts(
+                    listOf(
+                        "gas",
+                        "premium"
+                    )
+                )
+            )
+        }
 
-            override fun onProductsPurchased(purchases: List<DataWrappers.PurchaseInfo>) {
-                Log.d(tag, "Purchase : $purchases")
-            }
-
-            override fun onError(
-                inAppConnector: EasyIapConnector,
-                result: DataWrappers.BillingResponse?
-            ) {
-                Log.d(tag, "Error : ${result?.message}")
-            }
-        })
+        lifecycleScope.launch {
+            fetchedSkuDetailsList.addAll(
+                easyIapConnector.getSubscriptionProducts(
+                    listOf(
+                        "infinite_gas_monthly",
+                        "infinite_gas_yearly"
+                    )
+                )
+            )
+        }
     }
 
     private fun listeners() {
         bt_purchase_cons.setOnClickListener {
-            if (fetchedSkuDetailsList.find { it.sku == "gas" } != null)
-                easyIapConnector.makePurchase("gas")
+            fetchedSkuDetailsList.find { it.sku == "gas" }?.let {
+                lifecycleScope.launch {
+                    easyIapConnector.purchaseProduct(this@MainActivity, it)
+                }
+            }
         }
         bt_purchase_subs.setOnClickListener {
-            if (fetchedSkuDetailsList.find { it.sku == "gold_monthly" } != null)
-                easyIapConnector.makePurchase("gold_monthly")
+            fetchedSkuDetailsList.find { it.sku == "infinite_gas_monthly" }?.let {
+                lifecycleScope.launch {
+                    easyIapConnector.purchaseProduct(this@MainActivity, it)
+                }
+            }
         }
         bt_purchase_iap.setOnClickListener {
-            if (fetchedSkuDetailsList.find { it.sku == "premium_car" } != null)
-                easyIapConnector.makePurchase("premium_car")
+            fetchedSkuDetailsList.find { it.sku == "premium" }?.let {
+                lifecycleScope.launch {
+                    easyIapConnector.purchaseProduct(this@MainActivity, it)
+                }
+            }
         }
     }
 }

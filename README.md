@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg?style=for-the-badge)](https://www.android.com/)
 [![API](https://img.shields.io/badge/API-21%2B-F44336.svg?style=for-the-badge)](https://android-arsenal.com/api?level=21)
 
-EasyIAP is an Android library to handle In-App purchases with minimal code.
+EasyIAP is an Android library backed with power of Kotlin coroutines to handle In-App purchases with minimal code.
 
 ## Features
 
@@ -17,6 +17,7 @@ EasyIAP is an Android library to handle In-App purchases with minimal code.
 * Easy initialisation
 * Supports InApp & Subscription products
 * Simple configuration for consumable products
+* Leverages Kotlin coroutines & flow
 
 ## Gradle Dependency
 
@@ -35,7 +36,7 @@ allprojects {
 
 ```
 dependencies {
-    implementation 'com.github.smokelaboratory:easy-iap:1.0.0'
+    implementation 'com.github.smokelaboratory:easy-iap:2.0.0'
 }
 ```
 
@@ -62,7 +63,7 @@ Please have a look at [Contributing Guidelines](https://github.com/smokelaborato
 # License
 
 ```
-   Copyright © 2019 smokelaboratory
+   Copyright © 2021 smokelaboratory
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
