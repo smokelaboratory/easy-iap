@@ -111,7 +111,11 @@ class EasyIapConnector(context: Context) {
                             )
 
                             isIapConnected = false
-                            it.resume(Unit)
+                            try {
+                                it.resume(Unit)
+                            } catch (e: Exception) {
+                                
+                            }
                         }
                     })
                 }
