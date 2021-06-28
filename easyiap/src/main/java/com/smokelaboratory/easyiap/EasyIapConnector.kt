@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
@@ -92,7 +93,7 @@ class EasyIapConnector(context: Context) {
     private suspend fun connectIap() {
         iapConnectionMutex.withLock {
             if (!isIapConnected)
-                suspendCoroutine<Unit> {
+                suspendCancellableCoroutine<Unit> {
                     billingClient.startConnection(object : BillingClientStateListener {
                         override fun onBillingSetupFinished(billingResult: BillingResult) {
                             when (billingResult.responseCode) {
@@ -112,9 +113,10 @@ class EasyIapConnector(context: Context) {
 
                             isIapConnected = false
                             try {
-                                it.resume(Unit)
+                                if (it.isActive)
+                                    it.resume(Unit)
                             } catch (e: Exception) {
-                                
+
                             }
                         }
                     })
